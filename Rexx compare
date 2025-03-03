@@ -1,0 +1,71 @@
+/* REXX Script to Filter INSERT Statements by Table Names from a Separate File */
+
+/* Define DD names for input and output files */
+infile = 'INSERTS'          /* DD name for input file containing INSERT statements */
+tablefile = 'TABLES'        /* DD name for input file containing table names */
+outfile = 'FILTERED'        /* DD name for output file to store filtered INSERT statements */
+
+/* Allocate files */
+ADDRESS TSO "ALLOC FI(INSERTS) DA('YOUR.INPUT.DATASET') SHR"
+ADDRESS TSO "ALLOC FI(TABLES) DA('YOUR.TABLES.DATASET') SHR"
+ADDRESS TSO "ALLOC FI(FILTERED) DA('YOUR.OUTPUT.DATASET') NEW RECFM(FB) LRECL(80) BLKSIZE(0) TRACKS SPACE(5,5)"
+
+/* Create a stem variable to store table names */
+table. = ''                 
+tableCount = 0
+
+/* Read table names into a stem variable */
+DO WHILE (LINES(tablefile) > 0)
+    tableCount = tableCount + 1
+    table.tableCount = STRIP(LINEIN(tablefile))
+END
+
+/* Close the table names file */
+CALL LINEOUT tablefile
+
+/* Variables to process INSERT statements */
+insertBuffer = ''           /* Buffer to accumulate INSERT statement lines */
+statement = ''              /* Complete INSERT statement */
+
+/* Read INSERT statements line by line */
+DO WHILE (LINES(infile) > 0)
+    line = STRIP(LINEIN(infile))
+    insertBuffer = insertBuffer || ' ' || line
+    
+    /* Check if a complete statement is available */
+    IF POS(';', insertBuffer) > 0 THEN DO
+        /* Extract and process each complete statement */
+        DO WHILE POS(';', insertBuffer) > 0
+            statement = STRIP(SUBSTR(insertBuffer, 1, POS(';', insertBuffer)))
+            insertBuffer = STRIP(SUBSTR(insertBuffer, POS(';', insertBuffer) + 1))
+            
+            /* Extract table name from the statement */
+            PARSE VAR statement . 'INTO' tableName '(' .   
+            tableName = STRIP(tableName)
+            
+            /* Check if table name is in the list */
+            isValid = 0
+            DO i = 1 TO tableCount
+                IF table.i = tableName THEN isValid = 1
+            END
+            
+            /* Write to output file if table name is valid */
+            IF isValid = 1 THEN
+                CALL LINEOUT outfile, statement || ';'
+        END
+    END
+END
+
+/* Write remaining buffer if any */
+IF STRIP(insertBuffer) <> '' THEN
+    CALL LINEOUT outfile, insertBuffer || ';'
+
+/* Close all files */
+CALL LINEOUT infile
+CALL LINEOUT outfile
+ADDRESS TSO "FREE FI(INSERTS)"
+ADDRESS TSO "FREE FI(TABLES)"
+ADDRESS TSO "FREE FI(FILTERED)"
+
+SAY "Filtered INSERT statements have been written to the output file."
+EXIT
